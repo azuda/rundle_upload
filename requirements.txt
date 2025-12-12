@@ -1,0 +1,5 @@
+descope==1.7.1
+flask==3.1.0
+gradio==5.9.1
+python-dotenv==1.0.1
+rclone-python==0.1.23
