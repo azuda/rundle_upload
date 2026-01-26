@@ -251,23 +251,8 @@ def logout_user(stored_state):
     ["", ""]  # clear both tokens
   )
 
-# render webapp
-def create_app():
-  head_js = """
-  <script>
-  window.onload = function() {
-    const url = new URL(window.location);
-    if (url.searchParams.has('t') || url.searchParams.has('token')) {
-      url.searchParams.delete('t');
-      url.searchParams.delete('token');
-      url.searchParams.delete('r');
-      window.history.replaceState({}, document.title, url.pathname);
-    }
-  }
-  </script>
-  """
-
-  logout_js = """
+def logout_js():
+  return """
   () => {
     // Clear history so 'back' button doesn't work
     window.history.replaceState({}, document.title, "/");
@@ -276,6 +261,8 @@ def create_app():
   }
   """
 
+# render webapp
+def create_app():
   with gr.Blocks(title="Upload") as app:
     stored_state = gr.BrowserState(["", ""])  # [session_token, refresh_token]
 
@@ -291,15 +278,14 @@ def create_app():
     app.load(
       fn=get_token_and_update_state,
       inputs=[stored_state],
-      outputs=[login_page, main_page, login_message, stored_state],
-      # js=head_js
+      outputs=[login_page, main_page, login_message, stored_state]
     )
 
     logout_button.click(
       fn=logout_user,
       inputs=[stored_state],
       outputs=[login_page, main_page, login_message, stored_state],
-      js=logout_js
+      js=logout_js()
     )
 
   return app
