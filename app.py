@@ -53,7 +53,7 @@ def verify_magic_link():
 
   if not token:
     return "Error: Token is missing from the URL", 400
-  
+
   try:
     # verify token w descope
     user_response = descope_client.magiclink.verify(token)
@@ -120,7 +120,7 @@ def get_token_and_update_state(stored_state, request: gr.Request):
     # get current request context
     query_params = dict(request.query_params)
     print(f"Query params: {query_params}")
- 
+
     if query_params:
       token = query_params.get('t')
       if token == None:
@@ -188,43 +188,31 @@ def load_stored_session(stored_state):
   if isinstance(state_value, list) and len(state_value) > 0:
     session_token = state_value[0] if state_value[0] else None
     refresh_token = state_value[1] if len(state_value) > 1 else None
-  
+
   print(f"Has session token: {bool(session_token)}, Has refresh token: {bool(refresh_token)}")
 
+  # ---
   if session_token:
     try:
-      # Validate and refresh session token if expired
-      jwt_response = descope_client.validate_and_refresh_session(
-        session_token=session_token,
-        refresh_token=refresh_token
-      )
+      jwt_response = descope_client.validate_session(session_token)
       print(f"Session validated successfully")
-      
-      # Update tokens in case they were refreshed
-      new_session_token = jwt_response.get('sessionToken')
-      new_refresh_token = jwt_response.get('refreshToken')
-      
-      if isinstance(new_session_token, dict):
-        new_session_token = new_session_token.get('jwt')
-      if isinstance(new_refresh_token, dict):
-        new_refresh_token = new_refresh_token.get('jwt')
 
       return (
-        gr.update(visible=False), # hide login page
-        gr.update(visible=True),  # show main page
+        gr.update(visible=False),
+        gr.update(visible=True),
         f"Welcome back!",
-        [new_session_token, new_refresh_token]
+        [session_token, refresh_token]  # keep original tokens
       )
     except Exception as e:
-      print(f"Session validation failed: {str(e)}")
-      # Fall through to logout
+      print(f"Session expired or invalid: {str(e)}")
+      # Session expired - force re-login
 
-  # No valid session - show login page
+  # Show login page
   return (
-    gr.update(visible=True),  # show login page
-    gr.update(visible=False), # hide main page
+    gr.update(visible=True),
+    gr.update(visible=False),
     "",
-    ["", ""]  # clear both tokens
+    ["", ""]
   )
 
 def logout_user(stored_state):
@@ -240,8 +228,11 @@ def logout_user(stored_state):
         # try to kill on descope
         descope_client.logout_all(token_str)
         print(f"Token invalidated on Descope")
-  except Exception as e:
-    print(f"Error invalidating token: {str(e)}")
+  except AuthException as e:
+    # print(f"Error invalidating token: {str(e)}")
+    print ("Failed to log user out of all current sessions.")
+    print ("Status Code: " + str(e.status_code))
+    print ("Error: " + str(e.error_message))
 
   # return empty token list and show login page
   return (
