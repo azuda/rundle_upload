@@ -53,27 +53,33 @@ def verify_magic_link():
 
   if not token:
     return "Error: Token is missing from the URL", 400
-
+  
   try:
     # verify token w descope
     user_response = descope_client.magiclink.verify(token)
     print(f"User response: {user_response}")
 
-    # extract session token from descope response
+    # extract session and refresh tokens from descope response
     session_token = user_response.get('sessionToken')
+    refresh_token = user_response.get('refreshToken')
 
     if isinstance(session_token, dict):
       session_token = session_token.get('jwt')
+    if isinstance(refresh_token, dict):
+      refresh_token = refresh_token.get('jwt')
 
     print(f"Session token type: {type(session_token)}")
     print(f"Session token value: {session_token}")
+    print(f"Refresh token type: {type(refresh_token)}")
 
     if not session_token:
       raise AuthException("Failed to retrieve session token.")
+    if not refresh_token:
+      raise AuthException("Failed to retrieve refresh token.")
 
-    # redirect to gradio app w session token in url
+    # redirect to gradio app w session and refresh tokens in url
     # redirect_url = f'http://127.0.0.1:7860/?token={session_token}'
-    redirect_url = f"https://upload.rundle.ab.ca/?t={session_token}"
+    redirect_url = f"https://upload.rundle.ab.ca/?t={session_token}&r={refresh_token}"
     print(f"Redirecting to: {redirect_url}")
     return redirect(redirect_url)
 
@@ -84,9 +90,9 @@ def verify_magic_link():
 
 @app.after_request
 def disable_cache(response):
-  response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+  response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, post-check=0, pre-check=0, max-age=0'
   response.headers['Pragma'] = 'no-cache'
-  response.headers['Expires'] = '0'
+  response.headers['Expires'] = '-1'
   return response
 
 # ===============================================================================================================================
@@ -122,13 +128,14 @@ def get_token_and_update_state(stored_state, request: gr.Request):
 
       if token:
         print(f"Token received: {token}")
+        refresh_token = query_params.get('r', '')
 
-        # return token to be stored in browserstate
+        # return tokens to be stored in browserstate
         return (
           gr.update(visible=False), # hide login page
           gr.update(visible=True),  # show main page
           f"Successfully logged in!",
-          [token] # store token
+          [token, refresh_token] # store session and refresh tokens
         )
 
   except Exception as e:
@@ -174,27 +181,50 @@ def load_stored_session(stored_state):
   state_value = stored_state.value if hasattr(stored_state, 'value') else stored_state
   print(f"Loading session, state_value: {state_value}, type: {type(state_value)}")
 
-  # check if valid token
-  has_token = False
+  # check if valid tokens exist
+  session_token = None
+  refresh_token = None
+
   if isinstance(state_value, list) and len(state_value) > 0:
-    has_token = bool(state_value[0])
-  elif isinstance(state_value, str):
-    has_token = bool(state_value)
+    session_token = state_value[0] if state_value[0] else None
+    refresh_token = state_value[1] if len(state_value) > 1 else None
+  
+  print(f"Has session token: {bool(session_token)}, Has refresh token: {bool(refresh_token)}")
 
-  print(f"Has token: {has_token}")
+  if session_token:
+    try:
+      # Validate and refresh session token if expired
+      jwt_response = descope_client.validate_and_refresh_session(
+        session_token=session_token,
+        refresh_token=refresh_token
+      )
+      print(f"Session validated successfully")
+      
+      # Update tokens in case they were refreshed
+      new_session_token = jwt_response.get('sessionToken')
+      new_refresh_token = jwt_response.get('refreshToken')
+      
+      if isinstance(new_session_token, dict):
+        new_session_token = new_session_token.get('jwt')
+      if isinstance(new_refresh_token, dict):
+        new_refresh_token = new_refresh_token.get('jwt')
 
-  if has_token:
-    return (
-      gr.update(visible=False), # hide login page
-      gr.update(visible=True),  # show main page
-      f"Welcome back!",
-      state_value
-    )
+      return (
+        gr.update(visible=False), # hide login page
+        gr.update(visible=True),  # show main page
+        f"Welcome back!",
+        [new_session_token, new_refresh_token]
+      )
+    except Exception as e:
+      print(f"Session validation failed: {str(e)}")
+      # Fall through to logout
+
+  # No valid session - show login page
   return (
     gr.update(visible=True),  # show login page
     gr.update(visible=False), # hide main page
     "",
-    state_value if isinstance(state_value, list) else [""]
+    ["", ""]  # clear both tokens
   )
 
 def logout_user(stored_state):
@@ -208,7 +238,7 @@ def logout_user(stored_state):
       token_str = state_value[0]
       if isinstance(token_str, str):
         # try to kill on descope
-        descope_client.logout(token_str)
+        descope_client.logout_all(token_str)
         print(f"Token invalidated on Descope")
   except Exception as e:
     print(f"Error invalidating token: {str(e)}")
@@ -218,13 +248,36 @@ def logout_user(stored_state):
     gr.update(visible=True),  # show login page
     gr.update(visible=False), # hide main page
     "You have been logged out.",
-    [""]
+    ["", ""]  # clear both tokens
   )
 
 # render webapp
 def create_app():
-  with gr.Blocks() as app:
-    stored_state = gr.BrowserState([""])
+  head_js = """
+  <script>
+  window.onload = function() {
+    const url = new URL(window.location);
+    if (url.searchParams.has('t') || url.searchParams.has('token')) {
+      url.searchParams.delete('t');
+      url.searchParams.delete('token');
+      url.searchParams.delete('r');
+      window.history.replaceState({}, document.title, url.pathname);
+    }
+  }
+  </script>
+  """
+
+  logout_js = """
+  () => {
+    // Clear history so 'back' button doesn't work
+    window.history.replaceState({}, document.title, "/");
+    // Use location.replace to ensure the current entry is overwritten
+    setTimeout(() => { window.location.replace("/")}, 300);
+  }
+  """
+
+  with gr.Blocks(title="Upload") as app:
+    stored_state = gr.BrowserState(["", ""])  # [session_token, refresh_token]
 
     login_page, email, send_button, login_message = create_login_page()
     main_page, logout_button = create_main_page()
@@ -238,14 +291,15 @@ def create_app():
     app.load(
       fn=get_token_and_update_state,
       inputs=[stored_state],
-      outputs=[login_page, main_page, login_message, stored_state]
+      outputs=[login_page, main_page, login_message, stored_state],
+      # js=head_js
     )
 
     logout_button.click(
       fn=logout_user,
       inputs=[stored_state],
       outputs=[login_page, main_page, login_message, stored_state],
-      js="() => { setTimeout(() => window.location.assign('/'), 500) }"
+      js=logout_js
     )
 
   return app
