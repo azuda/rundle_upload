@@ -31,8 +31,8 @@ fi
 APP_PID=$!
 echo "App started w PID: $APP_PID"
 
-sleep 3
+sleep 5
 
-cloudflared tunnel run --protocol http2 --token "$CF_TUNNEL_TOKEN" --url "http://127.0.0.1:${PORT}"
+cloudflared tunnel run --protocol http2 --token "$CF_TUNNEL_TOKEN"
 
 cleanup
