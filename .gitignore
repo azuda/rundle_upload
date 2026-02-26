@@ -1,6 +1,7 @@
+__pycache__/
+.venv/
 .DS_Store
 Thumbs.db
-.venv/
 .env
 *.pem
 rclone.conf
