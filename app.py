@@ -3,25 +3,26 @@
 # sso w magic link source
 # https://github.com/benitomartin/gradio-sso-auth-descope
 
-import gradio as gr
+from descope import DescopeClient, DeliveryMethod, AuthException
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse, PlainTextResponse
-from starlette.requests import Request
-from descope import DescopeClient, DeliveryMethod, AuthException
+import gradio as gr
 import os
-from dotenv import load_dotenv
 from rclone_python import rclone
+import resend
+from starlette.requests import Request
+from urllib.parse import quote
 import uuid
-import shutil
 
-# descope client setup
 load_dotenv()
 PROJECT_ID = os.getenv("DESCOPE_ID")
 descope_client = DescopeClient(project_id=PROJECT_ID)
 
-# config for cloudflare r2 storage upload
 RCLONE_CONFIG = os.getenv("RCLONE_CONFIG")
 BUCKET = os.getenv("BUCKET")
+MGMT_KEY = os.getenv("DESCOPE_MGMT_KEY")
+RESEND_KEY = os.getenv("RESEND_KEY")
 
 # change acceptable file formats here
 FILE_TYPES = ["audio", ".pdf"]
@@ -53,9 +54,6 @@ async def verify_magic_link(request: Request):
 
   try:
     user_response = descope_client.magiclink.verify(token)
-    # print(f"Full user_response: {user_response}", flush=True)
-    # print(f"Full user_response: {user_response}")
-    # print(f"Keys: {user_response.keys() if user_response else 'None'}")
 
     session_token = user_response.get('sessionToken', {})
     refresh_token = user_response.get('refreshSessionToken', {})
@@ -71,7 +69,6 @@ async def verify_magic_link(request: Request):
       return PlainTextResponse("Authentication error: Failed to retrieve refresh token.", status_code=400)
 
     redirect_url = f"https://upload.rundle.ab.ca/?t={session_token}&r={refresh_token}"
-    # print(f"Redirecting to: {redirect_url}")
     return RedirectResponse(url=redirect_url)
 
   except AuthException as e:
@@ -91,7 +88,6 @@ def send_magic_link(email):
     return "Error: Please use your Rundle email address."
 
   try:
-    # generate magic link
     descope_client.magiclink.sign_up_or_in(
       method=DeliveryMethod.EMAIL,
       login_id=email,
@@ -103,22 +99,25 @@ def send_magic_link(email):
 
 def get_token_and_update_state(stored_state, request: gr.Request):
   try:
-    # get current request context
     query_params = dict(request.query_params)
-    # print(f"Query params: {query_params}")
 
     if query_params:
       token = query_params.get('t')
       if token:
-        # print(f"Token received: {token}")
         refresh_token = query_params.get('r', '')
 
-        # return tokens to be stored in browserstate
+        user_email = ""
+        try:
+          jwt_response = descope_client.validate_session(token)
+          user_email = extract_email_from_jwt(jwt_response)
+        except Exception as e:
+          print(f"Could not extract email from token: {e}")
+
         return (
           gr.update(visible=False), # hide login page
           gr.update(visible=True),  # show main page
           f"Successfully logged in!",
-          [token, refresh_token] # store session and refresh tokens
+          [token, refresh_token, user_email]
         )
 
   except Exception as e:
@@ -140,7 +139,7 @@ def create_login_page():
   return login_page, email, send_button, login_message
 
 # authed actual page content
-def create_main_page():
+def create_main_page(stored_state):
   global FILE_TYPES
 
   with gr.Column(visible=False) as main_page:
@@ -153,17 +152,20 @@ def create_main_page():
         upload_button = gr.Button("Upload File(s)", elem_id="button_colour")
       with gr.Column(scale=2):
         status_output = gr.Textbox(label="Status")
-    output_table = gr.Dataframe(headers=["File Name", "URL"], label="Uploaded Files", datatype=["str", "str"])
-    upload_button.click(upload, inputs=[files_input], outputs=[status_output, output_table])
+    output_table = gr.Dataframe(headers=["Filename", "URL"], label="Uploaded Files", datatype=["str", "str"])
+    upload_button.click(
+      fn=upload,
+      inputs=[files_input, stored_state],
+      outputs=[status_output, output_table]
+    )
+
     logout_button = gr.Button("Logout", variant="secondary")
   return main_page, logout_button
 
 def load_stored_session(stored_state):
-  # extract value from browserstate obj
   state_value = stored_state.value if hasattr(stored_state, 'value') else stored_state
   print(f"Loading session, state_value: {state_value}, type: {type(state_value)}")
 
-  # check if valid tokens exist
   session_token = None
   refresh_token = None
   if isinstance(state_value, list) and len(state_value) > 0:
@@ -174,18 +176,18 @@ def load_stored_session(stored_state):
   if session_token:
     try:
       jwt_response = descope_client.validate_session(session_token)
+      user_email = extract_email_from_jwt(jwt_response)
       print(f"Session validated successfully")
 
       return (
         gr.update(visible=False),
         gr.update(visible=True),
         f"Welcome back!",
-        [session_token, refresh_token]  # keep original tokens
+        [session_token, refresh_token, user_email]
       )
     except Exception as e:
       print(f"Session expired or invalid: {str(e)}")
 
-      # Try to refresh the session using refresh token
       if refresh_token:
         try:
           print("Attempting to refresh session...")
@@ -201,16 +203,22 @@ def load_stored_session(stored_state):
 
           if new_session_token:
             print("Session refreshed successfully")
+            user_email = ""
+            try:
+              jwt_response = descope_client.validate_session(new_session_token)
+              user_email = extract_email_from_jwt(jwt_response)
+            except Exception as e:
+              print(f"Could not extract email after refresh: {e}")
+
             return (
               gr.update(visible=False),
               gr.update(visible=True),
               f"Session refreshed. Welcome back!",
-              [new_session_token, new_refresh_token]
+              [new_session_token, new_refresh_token, user_email]
             )
         except Exception as refresh_error:
           print(f"Failed to refresh session: {str(refresh_error)}")
 
-  # show login page if no valid session
   return (
     gr.update(visible=True),
     gr.update(visible=False),
@@ -219,38 +227,30 @@ def load_stored_session(stored_state):
   )
 
 def logout_user(stored_state):
-  # clear session and reset ui to login page
   state_value = stored_state.value if hasattr(stored_state, 'value') else stored_state
 
-  # kill token on descope side
   try:
     if isinstance(state_value, list) and len(state_value) > 0 and state_value[0]:
-      # check if token is a jwt str or a dict
       token_str = state_value[0]
       if isinstance(token_str, str):
-        # try to kill on descope
         descope_client.logout_all(token_str)
         print(f"Token invalidated on Descope")
   except AuthException as e:
-    # print(f"Error invalidating token: {str(e)}")
-    print ("Failed to log user out of all current sessions.")
-    print ("Status Code: " + str(e.status_code))
-    print ("Error: " + str(e.error_message))
+    print("Failed to log user out of all current sessions.")
+    print("Status Code: " + str(e.status_code))
+    print("Error: " + str(e.error_message))
 
-  # return empty token list and show login page
   return (
     gr.update(visible=True),  # show login page
     gr.update(visible=False), # hide main page
     "You have been logged out.",
-    ["", ""]  # clear both tokens
+    ["", ""]
   )
 
 def logout_js():
   return """
   () => {
-    // Clear history so 'back' button doesn't work
     window.history.replaceState({}, document.title, "/");
-    // Use location.replace to ensure the current entry is overwritten
     setTimeout(() => { window.location.replace("/")}, 300);
   }
   """
@@ -258,10 +258,10 @@ def logout_js():
 # render webapp
 def create_app():
   with gr.Blocks(title="Upload") as gradio_ui:
-    stored_state = gr.BrowserState(["", ""])  # [session_token, refresh_token]
+    stored_state = gr.BrowserState(["", "", ""])  # [session_token, refresh_token, user_email]
 
     login_page, email, send_button, login_message = create_login_page()
-    main_page, logout_button = create_main_page()
+    main_page, logout_button = create_main_page(stored_state)
 
     send_button.click(
       fn=send_magic_link,
@@ -287,10 +287,9 @@ def create_app():
 
 # ============================================================================================================================================================================
 
-# upload backend
-def upload(files):
+# upload backend function
+def upload(files, stored_state):
   global RCLONE_CONFIG, BUCKET
-  # normalize possible gradio.file inputs to list of local paths
   srcs = []
   if isinstance(files, (str, bytes, os.PathLike)):
     srcs = [str(files)]
@@ -299,7 +298,6 @@ def upload(files):
       if isinstance(f, str):
         srcs.append(f)
       elif isinstance(f, dict):
-        # dict with tmp_path / name / file / path
         p = f.get("tmp_path") or f.get("path") or f.get("name") or f.get("file")
         if p:
           srcs.append(p)
@@ -316,7 +314,6 @@ def upload(files):
   else:
     print("RCLONE_CONFIG not set")
 
-  # put uploaded files in bucket/DIGIEXAM/<UUID> - UUID unique to each upload
   id_path = str(uuid.uuid4())
   remote_path = f"{BUCKET}/DIGIEXAM/{id_path}"
   try:
@@ -327,7 +324,6 @@ def upload(files):
   except Exception as e:
     print(f"rclone.mkdir warning: {e}")
 
-  # copy each source individually to avoid rclone_python converting a list into a single string
   uploaded = []
   failures = []
   for s in srcs:
@@ -339,23 +335,79 @@ def upload(files):
       print(f"rclone.copy failed for {s}: {e}")
 
   if not uploaded:
-    # return first failure message if available
     err = failures[0][1] if failures else "Unknown error"
     return f"Upload failed: {err}", []
 
   status_message = f"Uploaded {len(uploaded)} file(s) to Rundle CDN with path {remote_path}"
   print(status_message)
 
-  # rows for output table [filename, url]
-  rows = [[os.path.basename(s), f"https://cdn.rundle.ab.ca/DIGIEXAM/{id_path}/{os.path.basename(s)}"] for s in uploaded]
+  rows = [
+    [os.path.basename(s), f"https://cdn.rundle.ab.ca/DIGIEXAM/{id_path}/{quote(os.path.basename(s))}"]
+    for s in uploaded
+  ]
+
+  # email output links to user
+  if rows:
+    try:
+      state_value = stored_state.value if hasattr(stored_state, 'value') else stored_state
+      session_token = state_value[0] if len(state_value) > 0 else None
+      user_email = state_value[2] if len(state_value) > 2 else None
+
+      # Recover email from token if it wasn't populated in state
+      if session_token and not user_email:
+        try:
+          jwt_response = descope_client.validate_session(session_token)
+          user_email = extract_email_from_jwt(jwt_response)
+          print(f"Recovered email from token: {user_email}")
+        except Exception as e:
+          print(f"Could not recover email from token: {e}")
+
+      if not session_token or not user_email:
+        print(f"Cannot send email: missing session_token or user_email in state: {state_value}")
+      else:
+        send_upload_email(user_email, rows)
+
+    except Exception as e:
+      print(f"Failed to send uploaded links email: {e}")
+
   return status_message, rows
 
-def process_fileobj(fileobj):
-  result = []
-  path = f"{os.getcwd()}/{os.path.basename(fileobj)}"
-  shutil.copyfile(fileobj.name, path)
-  result.append(path)
-  return result
+def extract_email_from_jwt(jwt_response):
+  if not jwt_response:
+    return ""
+  claims = jwt_response.get("token") if isinstance(jwt_response.get("token"), dict) else jwt_response
+  return (
+    claims.get("email")
+    or (claims.get("loginIds") or [""])[0]
+    or claims.get("sub", "")
+  ) or ""
+
+def send_upload_email(email, links):
+  links_html = "".join(
+    f'<tr><td style="border:1px solid #000000;padding:8px">{name}</td><td style="border:1px solid #000000;padding:8px">{url}</td></tr>'
+    for name, url in links
+  )
+  email_html = f"""
+  <table style="border-collapse:collapse;width:100%;background:#ffffff;color:#000000;border:2px solid #000000;font-family:sans-serif">
+    <thead>
+      <tr style="background:#ffffff">
+        <th style="border:1px solid #000000;padding:8px;text-align:left">Filename</th>
+        <th style="border:1px solid #000000;padding:8px;text-align:left">URL</th>
+      </tr>
+    </thead>
+    <tbody>
+      {links_html}
+    </tbody>
+  </table>
+  """
+
+  resend.api_key = RESEND_KEY
+  resend.Emails.send({
+    "from": "noreply@rundle.ab.ca",
+    "to": email,
+    "subject": "Your files were uploaded successfully to Rundle CDN",
+    "html": email_html
+  })
 
 # ============================================================================================================================================================================
 
