@@ -14,6 +14,8 @@ import resend
 from starlette.requests import Request
 from urllib.parse import quote
 import uuid
+import json
+import subprocess
 
 load_dotenv()
 PROJECT_ID = os.getenv("DESCOPE_ID")
@@ -289,7 +291,17 @@ def create_app():
 
 # upload backend function
 def upload(files, stored_state):
-  global RCLONE_CONFIG, BUCKET
+  state_value = stored_state.value if hasattr(stored_state, 'value') else stored_state
+  user_email = state_value[2] if len(state_value) > 2 else None
+
+  if not user_email:
+    return "Could not determine user identity. Please log in again.", []
+
+  user_uuid = get_user_uuid(user_email)
+  upload_uuid = str(uuid.uuid4())
+  upload_dir = f"{BUCKET}/{user_uuid}/{upload_uuid}"
+
+  # Build srcs list (same as before)
   srcs = []
   if isinstance(files, (str, bytes, os.PathLike)):
     srcs = [str(files)]
@@ -303,32 +315,46 @@ def upload(files, stored_state):
           srcs.append(p)
       elif hasattr(f, "name"):
         srcs.append(getattr(f, "name"))
-  else:
-    print(f"Unhandled files input type: {type(files)} -> {files}")
 
   if not srcs:
-    return "No valid local file paths found for upload", []
+    return "No valid local file paths found for upload.", []
 
   if RCLONE_CONFIG:
     rclone.set_config_file(RCLONE_CONFIG)
-  else:
-    print("RCLONE_CONFIG not set")
 
-  id_path = str(uuid.uuid4())
-  remote_path = f"{BUCKET}/DIGIEXAM/{id_path}"
+  # Check ALL existing files across all upload batches for this user
+  existing = list_user_files(user_uuid)  # scans bucket/<user_uuid>/ recursively
+
+  duplicates = []
+  to_upload = []
+  for s in srcs:
+    name = os.path.basename(s)
+    size = os.path.getsize(s)
+    if name in existing and existing[name] == size:
+      duplicates.append(name)
+    else:
+      to_upload.append(s)
+
+  if not to_upload:
+    dup_list = ", ".join(duplicates)
+    return f"All files already exist in your storage: {dup_list}", []
+
+  user_dir = f"{BUCKET}/{user_uuid}"
+  is_new_user = not existing
+
   try:
-    rclone.mkdir(remote_path, args=["--verbose"])
-    print("============================================================================================")
-    print(f"Created directory {remote_path} in R2")
-    print("============================================================================================")
+    rclone.mkdir(upload_dir, args=["--verbose"])
   except Exception as e:
-    print(f"rclone.mkdir warning: {e}")
+    print(f"mkdir warning: {e}")
+
+  if is_new_user:
+    write_user_meta(user_uuid, user_email)
 
   uploaded = []
   failures = []
-  for s in srcs:
+  for s in to_upload:
     try:
-      rclone.copy(s, remote_path, ignore_existing=True, args=["--create-empty-src-dirs"])
+      rclone.copy(s, upload_dir, ignore_existing=True, args=["--create-empty-src-dirs"])
       uploaded.append(s)
     except Exception as e:
       failures.append((s, str(e)))
@@ -338,39 +364,48 @@ def upload(files, stored_state):
     err = failures[0][1] if failures else "Unknown error"
     return f"Upload failed: {err}", []
 
-  status_message = f"Uploaded {len(uploaded)} file(s) to Rundle CDN with path {remote_path}"
-  print(status_message)
-
   rows = [
-    [os.path.basename(s), f"https://cdn.rundle.ab.ca/DIGIEXAM/{id_path}/{quote(os.path.basename(s))}"]
+    [os.path.basename(s), f"https://cdn.rundle.ab.ca/{user_uuid}/{upload_uuid}/{quote(os.path.basename(s))}"]
     for s in uploaded
   ]
 
-  # email output links to user
-  if rows:
-    try:
-      state_value = stored_state.value if hasattr(stored_state, 'value') else stored_state
-      session_token = state_value[0] if len(state_value) > 0 else None
-      user_email = state_value[2] if len(state_value) > 2 else None
+  status_parts = [f"Uploaded {len(uploaded)} file(s) to path {user_uuid}/{upload_uuid}/"]
+  if duplicates:
+    status_parts.append(f"Skipped {len(duplicates)} duplicate(s): {', '.join(duplicates)}")
+  if failures:
+    status_parts.append(f"Failed: {', '.join(f[0] for f in failures)}")
 
-      # Recover email from token if it wasn't populated in state
-      if session_token and not user_email:
-        try:
-          jwt_response = descope_client.validate_session(session_token)
-          user_email = extract_email_from_jwt(jwt_response)
-          print(f"Recovered email from token: {user_email}")
-        except Exception as e:
-          print(f"Could not recover email from token: {e}")
+  status = " | ".join(status_parts)
 
-      if not session_token or not user_email:
-        print(f"Cannot send email: missing session_token or user_email in state: {state_value}")
-      else:
-        send_upload_email(user_email, rows)
+  try:
+    send_upload_email(user_email, rows)
+  except Exception as e:
+    print(f"Email failed: {e}")
 
-    except Exception as e:
-      print(f"Failed to send uploaded links email: {e}")
+  return status, rows
 
-  return status_message, rows
+def get_user_uuid(email):
+  return str(uuid.uuid5(uuid.NAMESPACE_DNS, email.lower().strip()))
+
+def list_user_files(user_uuid: str) -> dict[str, int]:
+  """Returns {filename: size_in_bytes} across all upload batches for this user."""
+  remote_path = f"{BUCKET}/{user_uuid}"
+  try:
+    result = subprocess.run(
+      ["rclone", "--config", RCLONE_CONFIG, "lsjson", "--recursive", remote_path],
+      capture_output=True, text=True, timeout=30
+    )
+    if result.returncode != 0:
+      return {}
+    entries = json.loads(result.stdout or "[]")
+    return {
+      os.path.basename(e["Path"]): e["Size"]   # Path is relative: <upload_uuid>/<filename>
+      for e in entries
+      if not e.get("IsDir", False)
+    }
+  except Exception as e:
+    print(f"lsjson failed: {e}")
+    return {}
 
 def extract_email_from_jwt(jwt_response):
   if not jwt_response:
@@ -381,6 +416,19 @@ def extract_email_from_jwt(jwt_response):
     or (claims.get("loginIds") or [""])[0]
     or claims.get("sub", "")
   ) or ""
+
+def write_user_meta(user_uuid, email):
+  import tempfile
+  meta_path = os.path.join(tempfile.mkdtemp(), ".meta")
+  with open(meta_path, "w") as f:
+    f.write(email)
+  try:
+    rclone.copy(meta_path, f"{BUCKET}/{user_uuid}", args=["--verbose"])
+    print(f"Written .meta for {user_uuid}")
+  except Exception as e:
+    print(f"Failed to write .meta: {e}")
+  finally:
+    os.remove(meta_path)
 
 def send_upload_email(email, links):
   links_html = "".join(
