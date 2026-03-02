@@ -1,6 +1,6 @@
 # app.py
 
-# sso w magic link source
+# sso w magic link via descope
 # https://github.com/benitomartin/gradio-sso-auth-descope
 
 from descope import DescopeClient, DeliveryMethod, AuthException
@@ -8,13 +8,13 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse, PlainTextResponse
 import gradio as gr
+import json
 import os
 from rclone_python import rclone
 import resend
 from starlette.requests import Request
 from urllib.parse import quote
 import uuid
-import json
 import subprocess
 
 load_dotenv()
@@ -259,7 +259,7 @@ def logout_js():
 
 # render webapp
 def create_app():
-  with gr.Blocks(title="Upload") as gradio_ui:
+  with gr.Blocks(title="Uploader") as gradio_ui:
     stored_state = gr.BrowserState(["", "", ""])  # [session_token, refresh_token, user_email]
 
     login_page, email, send_button, login_message = create_login_page()
@@ -301,7 +301,6 @@ def upload(files, stored_state):
   upload_uuid = str(uuid.uuid4())
   upload_dir = f"{BUCKET}/{user_uuid}/{upload_uuid}"
 
-  # Build srcs list (same as before)
   srcs = []
   if isinstance(files, (str, bytes, os.PathLike)):
     srcs = [str(files)]
@@ -322,8 +321,8 @@ def upload(files, stored_state):
   if RCLONE_CONFIG:
     rclone.set_config_file(RCLONE_CONFIG)
 
-  # Check ALL existing files across all upload batches for this user
-  existing = list_user_files(user_uuid)  # scans bucket/<user_uuid>/ recursively
+  # check all existing files in all subdirs for this user
+  existing = list_user_files(user_uuid)  # scan bucket/<user_uuid>/ recursively
 
   duplicates = []
   to_upload = []
