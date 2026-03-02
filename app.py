@@ -136,7 +136,7 @@ def create_login_page():
       email = gr.Textbox(label="Enter your email to log in:")
       send_button = gr.Button("Send One-Time Verification Link", elem_id="button_colour")
     with gr.Column(scale=2):
-      login_message = gr.Textbox(label="Status", interactive=False)
+      login_message = gr.Textbox(label="Status", interactive=False, lines=2, max_lines=16)
 
   return login_page, email, send_button, login_message
 
@@ -153,7 +153,7 @@ def create_main_page(stored_state):
                               file_types=FILE_TYPES)
         upload_button = gr.Button("Upload File(s)", elem_id="button_colour")
       with gr.Column(scale=2):
-        status_output = gr.Textbox(label="Status")
+        status_output = gr.Textbox(label="Status", lines=2, max_lines=16)
     output_table = gr.Dataframe(headers=["Filename", "URL"], label="Uploaded Files", datatype=["str", "str"])
     upload_button.click(
       fn=upload,
@@ -336,8 +336,8 @@ def upload(files, stored_state):
       to_upload.append(s)
 
   if not to_upload:
-    dup_list = ", ".join(duplicates)
-    return f"All files already exist in your storage: {dup_list}", []
+    dup_list = "\n".join(duplicates)
+    return f"All files have already been uploaded:\n{dup_list}\n\nPlease check your email inbox for previous upload results.", []
 
   user_dir = f"{BUCKET}/{user_uuid}"
   is_new_user = not existing
@@ -369,13 +369,13 @@ def upload(files, stored_state):
     for s in uploaded
   ]
 
-  status_parts = [f"Uploaded {len(uploaded)} file(s) to path {user_uuid}/{upload_uuid}/"]
+  status_parts = [f"Uploaded {len(uploaded)} file(s) to path {user_uuid}/{upload_uuid}/:\n" + "\n".join(f"{os.path.basename(s)}" for s in uploaded)]
   if duplicates:
-    status_parts.append(f"Skipped {len(duplicates)} duplicate(s): {', '.join(duplicates)}")
+    status_parts.append(f"Skipped {len(duplicates)} duplicate(s):\n{'\n'.join(duplicates)}")
   if failures:
     status_parts.append(f"Failed: {', '.join(f[0] for f in failures)}")
 
-  status = " | ".join(status_parts)
+  status = "\n\n".join(status_parts)
 
   try:
     send_upload_email(user_email, rows)
@@ -419,14 +419,14 @@ def extract_email_from_jwt(jwt_response):
 
 def write_user_meta(user_uuid, email):
   import tempfile
-  meta_path = os.path.join(tempfile.mkdtemp(), ".meta")
+  meta_name = "." + email.split("@")[0]
+  meta_path = os.path.join(tempfile.mkdtemp(), meta_name)
   with open(meta_path, "w") as f:
     f.write(email)
   try:
     rclone.copy(meta_path, f"{BUCKET}/{user_uuid}", args=["--verbose"])
-    print(f"Written .meta for {user_uuid}")
   except Exception as e:
-    print(f"Failed to write .meta: {e}")
+    print(f"Failed to make .{meta_name}: {e}")
   finally:
     os.remove(meta_path)
 
