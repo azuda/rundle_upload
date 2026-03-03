@@ -178,11 +178,12 @@ def create_main_page(stored_state):
         files_input = gr.Files(label="Select file(s) to upload...", file_types=FILE_TYPES)
         upload_button = gr.Button("Upload File(s)", elem_id="button_colour")
       with gr.Column(scale=2):
-        link_to_delete = gr.Textbox(label="Enter URL of a file to delete from cloud storage (exact match required):")
+        link_to_delete = gr.Textbox(label="Enter URL of a file to delete from cloud storage (exact match required):", lines=1, max_lines=2)
         delete_button = gr.Button("Delete File", variant="secondary")
-    status_output = gr.Textbox(label="Status", interactive=False, lines=1, max_lines=16)
-    output_table = gr.Dataframe(headers=["Filename", "URL"], label="Uploaded Files", datatype=["str", "str"])
-    logout_button = gr.Button("Logout", variant="secondary")
+    with gr.Column():
+      status_output = gr.Textbox(label="Status", interactive=False, lines=4, max_lines=16)
+      output_table = gr.Dataframe(headers=["Filename", "URL"], label="Uploaded Files", datatype=["str", "str"])
+      logout_button = gr.Button("Logout", variant="secondary")
 
     upload_button.click(
       fn=upload,
@@ -193,6 +194,10 @@ def create_main_page(stored_state):
       fn=unupload,
       inputs=[link_to_delete, stored_state],
       outputs=[status_output, output_table]
+    ).then(
+      fn=lambda: gr.update(value=""),
+      inputs=[],
+      outputs=[link_to_delete]
     )
   return main_page, logout_button
 
