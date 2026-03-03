@@ -200,12 +200,12 @@ def unupload(link: str, stored_state) -> tuple[str, list]:
   state_value = stored_state.value if hasattr(stored_state, 'value') else stored_state
   user_email = state_value[2] if len(state_value) > 2 else None
   if not user_email:
-    return "Could not determine user identity, please log in again.", []
+    return "Could not determine user identity, please log in again."
   
   # check user_uuid
   user_uuid = get_user_uuid(user_email)
   if user_uuid not in link:
-    return "Could not delete file - you do not have permission to delete this file.", []
+    return "Delete failed: you do not have permission to delete this file."
 
   link_path = unquote(link).replace("https://cdn.rundle.ab.ca/", "r2:canvas-storage/")
 
@@ -216,7 +216,7 @@ def unupload(link: str, stored_state) -> tuple[str, list]:
   )
   entries = json.loads(check.stdout or "[]")
   if not entries:
-    return "Could not delete file - file not found.", []
+    return "Delete failed: file not found."
 
   # delete file
   result = subprocess.run(
@@ -224,6 +224,6 @@ def unupload(link: str, stored_state) -> tuple[str, list]:
     capture_output=True, text=True, timeout=30
   )
   if result.returncode != 0:
-    return f"rclone deletefile failed: {result.stderr.strip() or 'unknown error'}", []
+    return f"rclone deletefile failed: {result.stderr.strip() or 'unknown error'}"
 
-  return f"Successfully deleted file at {link}.", []
+  return f"Successfully deleted file at {link}"
