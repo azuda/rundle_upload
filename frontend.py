@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import gradio as gr
 import os
 
-from backend import extract_email_from_jwt,upload
+from backend import extract_email_from_jwt, upload, unupload
 
 load_dotenv()
 PROJECT_ID = os.getenv("DESCOPE_ID")
@@ -161,8 +161,7 @@ def logout_js():
 # ============================================================================================================================================================================
 
 def create_login_page():
-  login_page = gr.Row(visible=True, equal_height=True)
-  with login_page:
+  with gr.Row(visible=True) as login_page:
     with gr.Column(scale=3):
       email = gr.Textbox(label="Enter your email to log in:")
       send_button = gr.Button("Send One-Time Verification Link", elem_id="button_colour")
@@ -179,14 +178,22 @@ def create_main_page(stored_state):
         files_input = gr.Files(label="Select file(s) to upload...", file_types=FILE_TYPES)
         upload_button = gr.Button("Upload File(s)", elem_id="button_colour")
       with gr.Column(scale=2):
-        status_output = gr.Textbox(label="Status", interactive=False, lines=2, max_lines=16)
+        link_to_delete = gr.Textbox(label="Enter URL of a file to delete from cloud storage (exact match required):")
+        delete_button = gr.Button("Delete File", variant="secondary")
+    status_output = gr.Textbox(label="Status", interactive=False, lines=1, max_lines=16)
     output_table = gr.Dataframe(headers=["Filename", "URL"], label="Uploaded Files", datatype=["str", "str"])
+    logout_button = gr.Button("Logout", variant="secondary")
+
     upload_button.click(
       fn=upload,
       inputs=[files_input, stored_state],
       outputs=[status_output, output_table]
     )
-    logout_button = gr.Button("Logout", variant="secondary")
+    delete_button.click(
+      fn=unupload,
+      inputs=[link_to_delete, stored_state],
+      outputs=[status_output, output_table]
+    )
   return main_page, logout_button
 
 def create_gradio_ui() -> gr.Blocks:
