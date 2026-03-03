@@ -193,7 +193,7 @@ def create_main_page(stored_state):
     delete_button.click(
       fn=unupload,
       inputs=[link_to_delete, stored_state],
-      outputs=[status_output, output_table]
+      outputs=[status_output]
     ).then(
       fn=lambda: gr.update(value=""),
       inputs=[],

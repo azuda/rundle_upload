@@ -201,13 +201,15 @@ def unupload(link: str, stored_state) -> tuple[str, list]:
   user_email = state_value[2] if len(state_value) > 2 else None
   if not user_email:
     return "Could not determine user identity, please log in again.", []
+  
+  # check user_uuid
   user_uuid = get_user_uuid(user_email)
   if user_uuid not in link:
     return "Could not delete file - you do not have permission to delete this file.", []
 
   link_path = unquote(link).replace("https://cdn.rundle.ab.ca/", "r2:canvas-storage/")
 
-  # check file exists before attempting deletion
+  # check file exists
   check = subprocess.run(
     ["rclone", "--config", RCLONE_CONFIG, "lsjson", link_path],
     capture_output=True, text=True, timeout=30
@@ -216,7 +218,7 @@ def unupload(link: str, stored_state) -> tuple[str, list]:
   if not entries:
     return "Could not delete file - file not found.", []
 
-  # delete the file
+  # delete file
   result = subprocess.run(
     ["rclone", "--config", RCLONE_CONFIG, "deletefile", link_path, "--verbose"],
     capture_output=True, text=True, timeout=30
