@@ -8,7 +8,7 @@ import re
 import resend
 import subprocess
 import tempfile
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 import uuid
 
 load_dotenv()
@@ -42,8 +42,13 @@ def list_user_files(user_uuid: str) -> dict[str, int]:
     if result.returncode != 0:
       return {}
     entries = json.loads(result.stdout or "[]")
+    # return {
+    #   normalize_filename(os.path.basename(e["Path"])): e["Size"]
+    #   for e in entries
+    #   if not e.get("IsDir", False)
+    # }
     return {
-      normalize_filename(os.path.basename(e["Path"])): e["Size"]
+      normalize_filename(unquote(os.path.basename(e["Path"]))): e["Size"]
       for e in entries
       if not e.get("IsDir", False)
     }
@@ -90,10 +95,10 @@ def send_upload_email(email: str, links: list):
   })
 
 def normalize_filename(name: str) -> str:
-  # strip common OS copy suffixes before duplicate comparison ex. (1), - Copy, etc.
   stem, ext = os.path.splitext(name)
-  stem = re.sub(r'\s*\(\d+\)$', '', stem)   # " (1)", " (2)", etc.
-  stem = re.sub(r'\s*-\s*Copy(\s*\(\d+\))?$', '', stem, flags=re.IGNORECASE)  # " - Copy", " - Copy (2)"
+  stem = re.sub(r'\s*-\s*copy(\s*\(?\d+\)?)?$', '', stem, flags=re.IGNORECASE)    # windows ex. " - Copy", " - Copy (1)", " - Copy 1"
+  stem = re.sub(r'\s*\(\d+\)$', '', stem)                                         # " (1)", " (2)", etc.
+  stem = re.sub(r'\s+copy(\s+\d+)?\s*$', '', stem, flags=re.IGNORECASE)           # macos ex. " copy", " copy 2"
   return stem.strip() + ext
 
 # ============================================================================================================================================================================
@@ -139,7 +144,7 @@ def upload(files, stored_state) -> tuple[str, list]:
     normalized = normalize_filename(name)
     size = os.path.getsize(s)
     if normalized in existing and existing[normalized] == size:
-      duplicates.append(name)
+      duplicates.append(normalized)
     else:
       to_upload.append(s)
 
@@ -190,3 +195,6 @@ def upload(files, stored_state) -> tuple[str, list]:
     print(f"Email failed: {e}")
 
   return status, rows
+
+def unupload(link: str, stored_state) -> tuple[str, list]:
+  pass
