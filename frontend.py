@@ -3,9 +3,10 @@
 from descope import DescopeClient, DeliveryMethod, AuthException
 from dotenv import load_dotenv
 import gradio as gr
+import pandas as pd
 import os
 
-from backend import extract_email_from_jwt, upload, unupload
+from backend import extract_email_from_jwt, get_user_uuid, list_user_uploads, upload, unupload
 
 load_dotenv()
 PROJECT_ID = os.getenv("DESCOPE_ID")
@@ -182,11 +183,11 @@ def create_main_page(stored_state):
         delete_button = gr.Button("Delete File", variant="secondary")
     with gr.Column():
       status_output = gr.Textbox(label="Status", interactive=False, lines=4, max_lines=16)
-      output_table = gr.Dataframe(headers=["Filename", "URL"], label="Uploaded Files", datatype=["str", "str"])
+      output_table = gr.Dataframe(headers=["Filename", "URL"], label="Your Uploaded Files", datatype=["str", "str"])
       logout_button = gr.Button("Logout", variant="secondary")
 
     upload_button.click(
-      fn=upload,
+      fn=do_upload,
       inputs=[files_input, stored_state],
       outputs=[status_output, output_table]
     )
@@ -198,26 +199,33 @@ def create_main_page(stored_state):
       fn=lambda: gr.update(value=""),
       inputs=[],
       outputs=[link_to_delete]
+    ).then(
+      fn=build_table,
+      inputs=[stored_state],
+      outputs=[output_table]
     )
-  return main_page, logout_button
+  return main_page, output_table, logout_button
 
 def create_gradio_ui() -> gr.Blocks:
+  # with gr.Blocks(title="Uploader", css=STYLE) as gradio_ui:
   with gr.Blocks(title="Uploader") as gradio_ui:
-    stored_state = gr.BrowserState(["", "", ""])  # [session_token, refresh_token, user_email]
+    stored_state = gr.BrowserState(["", "", ""])
 
     login_page, email, send_button, login_message = create_login_page()
-    main_page, logout_button = create_main_page(stored_state)
+    main_page, output_table, logout_button = create_main_page(stored_state)  # <-- unpack output_table
 
-    send_button.click(
-      fn=send_magic_link,
-      inputs=[email],
-      outputs=[login_message]
-    )
+    send_button.click(fn=send_magic_link, inputs=[email], outputs=[login_message])
+
     gradio_ui.load(
       fn=get_token_and_update_state,
       inputs=[stored_state],
       outputs=[login_page, main_page, login_message, stored_state]
+    ).then(
+      fn=build_table,          # populate table after login state is resolved
+      inputs=[stored_state],
+      outputs=[output_table]
     )
+
     logout_button.click(
       fn=logout_user,
       inputs=[stored_state],
@@ -226,3 +234,36 @@ def create_gradio_ui() -> gr.Blocks:
     )
 
   return gradio_ui
+
+def build_table(stored_state, highlight_urls: set = None):
+  state_value = stored_state.value if hasattr(stored_state, 'value') else stored_state
+  user_email = state_value[2] if isinstance(state_value, list) and len(state_value) > 2 else ""
+  
+  all_rows = []
+  if user_email:
+    user_uuid = get_user_uuid(user_email)
+    all_rows = list_user_uploads(user_uuid)
+
+  # move highlighted rows to top
+  n_highlighted = 0
+  if highlight_urls:
+    highlighted = [r for r in all_rows if r[1] in highlight_urls]
+    rest        = [r for r in all_rows if r[1] not in highlight_urls]
+    all_rows = highlighted + rest
+    n_highlighted = len(highlighted)
+
+  df = pd.DataFrame(all_rows if all_rows else [], columns=["Filename", "URL"])
+
+  if n_highlighted > 0:
+    highlight_indices = set(range(n_highlighted))
+    def _style_rows(row):
+      return ["background-color: #838554"] * len(row) if row.name in highlight_indices else [""] * len(row)
+    return df.style.apply(_style_rows, axis=1)
+
+  return df.style
+
+def do_upload(files, stored_state):
+  """Wrapper: run upload then rebuild the full table with new files highlighted."""
+  status, new_rows = upload(files, stored_state)
+  highlight_urls = {r[1] for r in new_rows} if new_rows else set()
+  return status, build_table(stored_state, highlight_urls)

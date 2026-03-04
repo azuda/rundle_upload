@@ -101,6 +101,33 @@ def normalize_filename(name: str) -> str:
   stem = re.sub(r'\s+copy(\s+\d+)?\s*$', '', stem, flags=re.IGNORECASE)           # macos ex. " copy", " copy 2"
   return stem.strip() + ext
 
+def list_user_uploads(user_uuid: str) -> list[list[str]]:
+  remote_path = f"{BUCKET}/{user_uuid}"
+  try:
+    result = subprocess.run(
+      ["rclone", "--config", RCLONE_CONFIG, "lsjson", "--recursive", "--files-only", remote_path],
+      capture_output=True, text=True, timeout=30
+    )
+    if result.returncode != 0:
+      return []
+    entries = json.loads(result.stdout or "[]")
+    rows = []
+    for e in entries:
+      path = e["Path"]             # e.g. "{upload_uuid}/filename.mp3"
+      parts = path.split("/")
+      if len(parts) < 2:
+        continue
+      filename = unquote(parts[-1])
+      if filename.startswith("."):  # skip meta files
+        continue
+      upload_uuid = parts[0]
+      url = f"https://cdn.rundle.ab.ca/{user_uuid}/{upload_uuid}/{quote(filename)}"
+      rows.append([filename, url])
+    return rows
+  except Exception as e:
+    print(f"list_user_uploads failed: {e}")
+    return []
+
 # ============================================================================================================================================================================
 
 def upload(files, stored_state) -> tuple[str, list]:
