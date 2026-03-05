@@ -1,5 +1,6 @@
 # backend.py
 
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import json
 import os
@@ -70,15 +71,16 @@ def write_user_meta(user_uuid: str, email: str):
 
 def send_upload_email(email: str, links: list):
   links_html = "".join(
-    f'<tr><td style="border:1px solid #000000;padding:8px">{name}</td><td style="border:1px solid #000000;padding:8px">{url}</td></tr>'
-    for name, url in links
+    f'<tr><td style="border:1px solid #000000;padding:8px">{name}</td><td style="border:1px solid #000000;padding:8px">{url}</td><td style="border:1px solid #000000;padding:8px">{date}</td></tr>'
+    for name, url, date in links
   )
   email_html = f"""
   <table style="border-collapse:collapse;width:100%;background:#ffffff;color:#000000;border:2px solid #000000;font-family:sans-serif">
     <thead>
       <tr style="background:#ffffff">
-        <th style="border:1px solid #000000;padding:8px;text-align:left">Filename</th>
-        <th style="border:1px solid #000000;padding:8px;text-align:left">URL</th>
+        <th style="border:1px solid #000000;padding:8px;text-align:left;width=20%">Filename</th>
+        <th style="border:1px solid #000000;padding:8px;text-align:left;width=60%">URL</th>
+        <th style="border:1px solid #000000;padding:8px;text-align:left;width=20%">Date Modified</th>
       </tr>
     </thead>
     <tbody>
@@ -113,16 +115,23 @@ def list_user_uploads(user_uuid: str) -> list[list[str]]:
     entries = json.loads(result.stdout or "[]")
     rows = []
     for e in entries:
-      path = e["Path"]             # e.g. "{upload_uuid}/filename.mp3"
+      path = e["Path"]
       parts = path.split("/")
       if len(parts) < 2:
         continue
       filename = unquote(parts[-1])
-      if filename.startswith("."):  # skip meta files
+      if filename.startswith("."):  # skip .meta files
         continue
       upload_uuid = parts[0]
       url = f"https://cdn.rundle.ab.ca/{user_uuid}/{upload_uuid}/{quote(filename)}"
-      rows.append([filename, url])
+      mod_time = e.get("ModTime", "")
+      try:
+        MST = timezone(timedelta(hours=-7))
+        dt = datetime.fromisoformat(mod_time.replace("Z", "+00:00")).astimezone(MST)
+        date_str = dt.strftime("%Y-%m-%d %H:%M UTC-7")
+      except Exception:
+        date_str = ""
+      rows.append([filename, url, date_str])
     return rows
   except Exception as e:
     print(f"list_user_uploads failed: {e}")
@@ -203,8 +212,26 @@ def upload(files, stored_state) -> tuple[str, list]:
     err = failures[0][1] if failures else "Unknown error"
     return f"Upload failed: {err}", []
 
+  MST = timezone(timedelta(hours=-7))
+  lsj = subprocess.run(
+    ["rclone", "--config", RCLONE_CONFIG, "lsjson", f"{BUCKET}/{user_uuid}/{upload_uuid}"],
+    capture_output=True, text=True, timeout=30
+  )
+  mod_times = {}
+  if lsj.returncode == 0:
+    for e in json.loads(lsj.stdout or "[]"):
+      try:
+        dt = datetime.fromisoformat(e["ModTime"].replace("Z", "+00:00")).astimezone(MST)
+        mod_times[e["Name"]] = dt.strftime("%Y-%m-%d %H:%M UTC-7")
+      except Exception:
+        pass
+
   rows = [
-    [os.path.basename(s), f"https://cdn.rundle.ab.ca/{user_uuid}/{upload_uuid}/{quote(os.path.basename(s))}"]
+    [
+      os.path.basename(s),
+      f"https://cdn.rundle.ab.ca/{user_uuid}/{upload_uuid}/{quote(os.path.basename(s))}",
+      mod_times.get(os.path.basename(s), "")
+    ]
     for s in uploaded
   ]
 

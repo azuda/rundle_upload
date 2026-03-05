@@ -168,6 +168,7 @@ def create_login_page():
       send_button = gr.Button("Send One-Time Verification Link", elem_id="button_colour")
     with gr.Column(scale=2):
       login_message = gr.Textbox(label="Status", interactive=False, lines=2, max_lines=16)
+    email.submit(fn=send_magic_link, inputs=[email], outputs=[login_message])
   return login_page, email, send_button, login_message
 
 def create_main_page(stored_state):
@@ -183,7 +184,12 @@ def create_main_page(stored_state):
         delete_button = gr.Button("Delete File", variant="secondary")
     with gr.Column():
       status_output = gr.Textbox(label="Status", interactive=False, lines=4, max_lines=16)
-      output_table = gr.Dataframe(headers=["Filename", "URL"], label="Your Uploaded Files", datatype=["str", "str"])
+      output_table = gr.Dataframe(
+        headers=["Filename", "URL", "Date Modified"],
+        label="Your Uploaded Files",
+        datatype=["str", "str", "str"],
+        column_widths=["20%", "60%", "20%"]
+      )
       logout_button = gr.Button("Logout", variant="secondary")
 
     upload_button.click(
@@ -192,6 +198,19 @@ def create_main_page(stored_state):
       outputs=[status_output, output_table]
     )
     delete_button.click(
+      fn=unupload,
+      inputs=[link_to_delete, stored_state],
+      outputs=[status_output]
+    ).then(
+      fn=lambda: gr.update(value=""),
+      inputs=[],
+      outputs=[link_to_delete]
+    ).then(
+      fn=build_table,
+      inputs=[stored_state],
+      outputs=[output_table]
+    )
+    link_to_delete.submit(
       fn=unupload,
       inputs=[link_to_delete, stored_state],
       outputs=[status_output]
@@ -252,18 +271,19 @@ def build_table(stored_state, highlight_urls: set = None):
     all_rows = highlighted + rest
     n_highlighted = len(highlighted)
 
-  df = pd.DataFrame(all_rows if all_rows else [], columns=["Filename", "URL"])
+  df = pd.DataFrame(all_rows if all_rows else [], columns=["Filename", "URL", "Date Modified"])
+  df = df.sort_values("Date Modified", ascending=False).reset_index(drop=True)
 
   if n_highlighted > 0:
     highlight_indices = set(range(n_highlighted))
     def _style_rows(row):
-      return ["background-color: #838554"] * len(row) if row.name in highlight_indices else [""] * len(row)
+      return ["background-color: #515115"] * len(row) if row.name in highlight_indices else [""] * len(row)
     return df.style.apply(_style_rows, axis=1)
 
   return df.style
 
 def do_upload(files, stored_state):
-  """Wrapper: run upload then rebuild the full table with new files highlighted."""
+  """wrapper function to run upload() + rebuild output_table"""
   status, new_rows = upload(files, stored_state)
   highlight_urls = {r[1] for r in new_rows} if new_rows else set()
   return status, build_table(stored_state, highlight_urls)
