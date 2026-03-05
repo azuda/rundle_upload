@@ -76,16 +76,12 @@ def send_upload_email(email: str, links: list):
   )
   email_html = f"""
   <table style="border-collapse:collapse;width:100%;background:#ffffff;color:#000000;border:2px solid #000000;font-family:sans-serif">
-    <thead>
-      <tr style="background:#ffffff">
-        <th style="border:1px solid #000000;padding:8px;text-align:left;width=20%">Filename</th>
-        <th style="border:1px solid #000000;padding:8px;text-align:left;width=60%">URL</th>
-        <th style="border:1px solid #000000;padding:8px;text-align:left;width=20%">Date Modified</th>
-      </tr>
-    </thead>
-    <tbody>
-      {links_html}
-    </tbody>
+    <tr style="background:#ffffff">
+      <th style="border:1px solid #000000;padding:8px;text-align:left;width=20%">Filename</th>
+      <th style="border:1px solid #000000;padding:8px;text-align:left;width=60%">URL</th>
+      <th style="border:1px solid #000000;padding:8px;text-align:left;width=20%">Date Modified</th>
+    </tr>
+    {links_html}
   </table>
   """
   resend.api_key = RESEND_KEY
