@@ -173,15 +173,19 @@ def create_login_page():
 
 def create_main_page(stored_state):
   with gr.Column(visible=False) as main_page:
-    gr.Markdown("# Rundle CDN Uploader")
-    gr.Markdown("Turn your files into easily shareable links by uploading them to the Rundle Cloudflare R2 Storage Bucket.")
+    with gr.Row():
+      with gr.Column(scale=11):
+        gr.Markdown("# Rundle CDN Uploader")
+        gr.Markdown("Turn your files into easily shareable links by uploading them to the Rundle Cloudflare R2 Storage Bucket.")
+      with gr.Column(scale=1):
+        admin_button = gr.Button("Admin", variant="huggingface")
     with gr.Row():
       with gr.Column(scale=3):
         files_input = gr.Files(label="Select file(s) to upload...", file_types=FILE_TYPES)
         upload_button = gr.Button("Upload File(s)", elem_id="button_colour")
       with gr.Column(scale=2):
         link_to_delete = gr.Textbox(label="Enter URL of a file to delete from cloud storage (exact match required):", lines=1, max_lines=2)
-        delete_button = gr.Button("Delete File", variant="secondary")
+        delete_button = gr.Button("Delete File", variant="huggingface")
     with gr.Column():
       status_output = gr.Textbox(label="Status", interactive=False, lines=4, max_lines=16)
       output_table = gr.Dataframe(
@@ -228,7 +232,7 @@ def create_main_page(stored_state):
 def create_gradio_ui() -> gr.Blocks:
   # with gr.Blocks(title="Uploader", css=STYLE) as gradio_ui:
   with gr.Blocks(title="Uploader") as gradio_ui:
-    stored_state = gr.BrowserState(["", "", ""])
+    stored_state = gr.BrowserState(["", "", "", True])
 
     login_page, email, send_button, login_message = create_login_page()
     main_page, output_table, logout_button = create_main_page(stored_state)  # <-- unpack output_table
