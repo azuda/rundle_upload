@@ -94,9 +94,9 @@ def send_upload_email(email: str, links: list):
 
 def normalize_filename(name: str) -> str:
   stem, ext = os.path.splitext(name)
-  stem = re.sub(r'\s*-\s*copy(\s*\(?\d+\)?)?$', '', stem, flags=re.IGNORECASE)    # windows ex. " - Copy", " - Copy (1)", " - Copy 1"
-  stem = re.sub(r'\s*\(\d+\)$', '', stem)                                         # " (1)", " (2)", etc.
-  stem = re.sub(r'\s+copy(\s+\d+)?\s*$', '', stem, flags=re.IGNORECASE)           # macos ex. " copy", " copy 2"
+  stem = re.sub(r'\s*-\s*copy(\s*\(?\d+\)?)?$', '', stem, flags=re.IGNORECASE)  # " - Copy", " - Copy (1)"
+  stem = re.sub(r'\s*\(\d+\)$', '', stem)                                        # " (1)", " (2)"
+  stem = re.sub(r'\s+copy(\s+\d+)?\s*$', '', stem, flags=re.IGNORECASE)          # " copy", " copy 2", "Copy 3", etc.
   return stem.strip() + ext
 
 def list_user_uploads(user_uuid: str) -> list[list[str]]:
@@ -146,19 +146,23 @@ def upload(files, stored_state) -> tuple[str, list]:
   upload_uuid = str(uuid.uuid4())
   upload_dir = f"{BUCKET}/{user_uuid}/{upload_uuid}"
 
-  srcs = []
+  srcs = []  # list of (temp_path, original_filename)
   if isinstance(files, (str, bytes, os.PathLike)):
-    srcs = [str(files)]
+    s = str(files)
+    srcs = [(s, os.path.basename(s))]
   elif isinstance(files, list):
     for f in files:
+      print(f"DEBUG file object: type={type(f)}, value={f}")
       if isinstance(f, str):
-        srcs.append(f)
+        srcs.append((f, os.path.basename(f)))
       elif isinstance(f, dict):
         p = f.get("tmp_path") or f.get("path") or f.get("name") or f.get("file")
+        orig = f.get("orig_name") or f.get("original_name") or (os.path.basename(p) if p else "")
         if p:
-          srcs.append(p)
+          srcs.append((p, orig))
       elif hasattr(f, "name"):
-        srcs.append(getattr(f, "name"))
+        p = getattr(f, "name")
+        srcs.append((p, os.path.basename(p)))
 
   if not srcs:
     return "No valid local file paths found for upload.", []
@@ -166,18 +170,16 @@ def upload(files, stored_state) -> tuple[str, list]:
   if RCLONE_CONFIG:
     rclone.set_config_file(RCLONE_CONFIG)
 
-  # check all existing files in all subdirs for this user
   existing = list_user_files(user_uuid)
 
   duplicates = []
-  to_upload = []
-  for s in srcs:
-    name = os.path.basename(s)
-    normalized = normalize_filename(name)
+  to_upload = []  # list of (temp_path, original_filename)
+  for temp_path, orig_name in srcs:
+    normalized = normalize_filename(orig_name)
     if normalized in existing:
       duplicates.append(normalized)
     else:
-      to_upload.append(s)
+      to_upload.append((temp_path, orig_name))
 
   if not to_upload:
     dup_list = "\n".join(duplicates)
@@ -193,15 +195,19 @@ def upload(files, stored_state) -> tuple[str, list]:
   if is_new_user:
     write_user_meta(user_uuid, user_email)
 
-  uploaded = []
+  uploaded = []  # list of (temp_path, original_filename)
   failures = []
-  for s in to_upload:
+  for temp_path, orig_name in to_upload:
     try:
-      rclone.copy(s, upload_dir, ignore_existing=True, args=["--create-empty-src-dirs"])
-      uploaded.append(s)
+      # copy to a temp dir with the correct original name so rclone uploads it with the right name
+      with tempfile.TemporaryDirectory() as tmp_dir:
+        dest_path = os.path.join(tmp_dir, orig_name)
+        os.link(temp_path, dest_path)
+        rclone.copy(dest_path, upload_dir, ignore_existing=True, args=["--create-empty-src-dirs"])
+      uploaded.append((temp_path, orig_name))
     except Exception as e:
-      failures.append((s, str(e)))
-      print(f"rclone.copy failed for {s}: {e}")
+      failures.append((orig_name, str(e)))
+      print(f"rclone.copy failed for {orig_name}: {e}")
 
   if not uploaded:
     err = failures[0][1] if failures else "Unknown error"
@@ -223,14 +229,14 @@ def upload(files, stored_state) -> tuple[str, list]:
 
   rows = [
     [
-      os.path.basename(s),
-      f"https://cdn.rundle.ab.ca/{user_uuid}/{upload_uuid}/{quote(os.path.basename(s))}",
-      mod_times.get(os.path.basename(s), "")
+      orig_name,
+      f"https://cdn.rundle.ab.ca/{user_uuid}/{upload_uuid}/{quote(orig_name)}",
+      mod_times.get(orig_name, "")
     ]
-    for s in uploaded
+    for _, orig_name in uploaded
   ]
 
-  status_parts = [f"Uploaded {len(uploaded)} file(s) to path {user_uuid}/{upload_uuid}/:\n" + "\n".join(os.path.basename(s) for s in uploaded)]
+  status_parts = [f"Uploaded {len(uploaded)} file(s) to path {user_uuid}/{upload_uuid}/:\n" + "\n".join(orig_name for _, orig_name in uploaded)]
   if duplicates:
     status_parts.append(f"Skipped {len(duplicates)} duplicate(s):\n{chr(10).join(duplicates)}\n\nPlease check your email inbox for previous upload results.")
   if failures:
