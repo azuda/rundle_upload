@@ -174,8 +174,7 @@ def upload(files, stored_state) -> tuple[str, list]:
   for s in srcs:
     name = os.path.basename(s)
     normalized = normalize_filename(name)
-    size = os.path.getsize(s)
-    if normalized in existing and existing[normalized] == size:
+    if normalized in existing:
       duplicates.append(normalized)
     else:
       to_upload.append(s)
