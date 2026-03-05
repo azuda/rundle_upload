@@ -181,7 +181,7 @@ def create_main_page(stored_state):
         upload_button = gr.Button("Upload File(s)", elem_id="button_colour")
       with gr.Column(scale=2):
         link_to_delete = gr.Textbox(label="Enter URL of a file to delete from cloud storage (exact match required):", lines=1, max_lines=2)
-        delete_button = gr.Button("Delete File", variant="secondary")
+        delete_button = gr.Button("Delete File", variant="huggingface")
     with gr.Column():
       status_output = gr.Textbox(label="Status", interactive=False, lines=4, max_lines=16)
       output_table = gr.Dataframe(
