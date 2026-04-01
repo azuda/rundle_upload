@@ -124,7 +124,7 @@ def list_user_uploads(user_uuid: str) -> list[list[str]]:
       try:
         MST = timezone(timedelta(hours=-7))
         dt = datetime.fromisoformat(mod_time.replace("Z", "+00:00")).astimezone(MST)
-        date_str = dt.strftime("%Y-%m-%d %H:%M UTC-7")
+        date_str = dt.strftime("%Y-%m-%d %H:%M MST")
       except Exception:
         date_str = ""
       rows.append([filename, url, date_str])
@@ -223,7 +223,7 @@ def upload(files, stored_state) -> tuple[str, list]:
     for e in json.loads(lsj.stdout or "[]"):
       try:
         dt = datetime.fromisoformat(e["ModTime"].replace("Z", "+00:00")).astimezone(MST)
-        mod_times[e["Name"]] = dt.strftime("%Y-%m-%d %H:%M UTC-7")
+        mod_times[e["Name"]] = dt.strftime("%Y-%m-%d %H:%M MST")
       except Exception:
         pass
 

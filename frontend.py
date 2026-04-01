@@ -188,7 +188,8 @@ def create_main_page(stored_state):
         headers=["Filename", "URL", "Date Modified"],
         label="Your Uploaded Files",
         datatype=["str", "str", "str"],
-        column_widths=["20%", "60%", "20%"]
+        column_widths=["20%", "60%", "20%"],
+        wrap=True
       )
       logout_button = gr.Button("Logout", variant="secondary")
 
@@ -277,9 +278,8 @@ def build_table(stored_state, highlight_urls: set = None):
   if n_highlighted > 0:
     highlight_indices = set(range(n_highlighted))
     def _style_rows(row):
-      return ["background-color: #515115"] * len(row) if row.name in highlight_indices else [""] * len(row)
+      return ["color-scheme: light dark; background-color: light-dark(#ffff54, #515115);"] * len(row) if row.name in highlight_indices else [""] * len(row)
     return df.style.apply(_style_rows, axis=1)
-
   return df.style
 
 def do_upload(files, stored_state):
