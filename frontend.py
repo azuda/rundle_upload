@@ -1,11 +1,15 @@
 # frontend.py
 
+
 from descope import DescopeClient, DeliveryMethod, AuthException
 from dotenv import load_dotenv
 import gradio as gr
-import pandas as pd
 import os
+import pandas as pd
+import traceback
+import truststore
 
+truststore.inject_into_ssl()
 from backend import extract_email_from_jwt, get_user_uuid, list_user_uploads, upload, unupload
 
 load_dotenv()
@@ -13,7 +17,7 @@ PROJECT_ID = os.getenv("DESCOPE_ID")
 descope_client = DescopeClient(project_id=PROJECT_ID)
 
 # change acceptable file formats here
-FILE_TYPES = ["audio", ".pdf"]
+FILE_TYPES = ["audio", ".pdf", ".html"]
 
 # css
 STYLE = """
@@ -63,7 +67,8 @@ def get_token_and_update_state(stored_state, request: gr.Request):
           [token, refresh_token, user_email]
         )
   except Exception as e:
-    print(f"Error processing request: {e}", exc_info=True)
+    print(f"Error processing request: {e}")
+    traceback.print_exc()
 
   print("No token in URL, checking stored state...")
   return load_stored_session(stored_state)
@@ -227,7 +232,6 @@ def create_main_page(stored_state):
   return main_page, output_table, logout_button
 
 def create_gradio_ui() -> gr.Blocks:
-  # with gr.Blocks(title="Uploader", css=STYLE) as gradio_ui:
   with gr.Blocks(title="Uploader") as gradio_ui:
     stored_state = gr.BrowserState(["", "", ""])
 
@@ -264,16 +268,16 @@ def build_table(stored_state, highlight_urls: set = None):
     user_uuid = get_user_uuid(user_email)
     all_rows = list_user_uploads(user_uuid)
 
-  # move highlighted rows to top
-  n_highlighted = 0
-  if highlight_urls:
-    highlighted = [r for r in all_rows if r[1] in highlight_urls]
-    rest        = [r for r in all_rows if r[1] not in highlight_urls]
-    all_rows = highlighted + rest
-    n_highlighted = len(highlighted)
-
   df = pd.DataFrame(all_rows if all_rows else [], columns=["Filename", "URL", "Date Modified"])
   df = df.sort_values("Date Modified", ascending=False).reset_index(drop=True)
+
+  # move highlighted rows to top after sorting
+  if highlight_urls:
+    mask = df["URL"].isin(highlight_urls)
+    df = pd.concat([df[mask], df[~mask]]).reset_index(drop=True)
+    n_highlighted = mask.sum()
+  else:
+    n_highlighted = 0
 
   if n_highlighted > 0:
     highlight_indices = set(range(n_highlighted))
@@ -281,6 +285,8 @@ def build_table(stored_state, highlight_urls: set = None):
       return ["color-scheme: light dark; background-color: light-dark(#ffff54, #515115);"] * len(row) if row.name in highlight_indices else [""] * len(row)
     return df.style.apply(_style_rows, axis=1)
   return df.style
+
+
 
 def do_upload(files, stored_state):
   """wrapper function to run upload() + rebuild output_table"""

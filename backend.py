@@ -43,11 +43,6 @@ def list_user_files(user_uuid: str) -> dict[str, int]:
     if result.returncode != 0:
       return {}
     entries = json.loads(result.stdout or "[]")
-    # return {
-    #   normalize_filename(os.path.basename(e["Path"])): e["Size"]
-    #   for e in entries
-    #   if not e.get("IsDir", False)
-    # }
     return {
       normalize_filename(unquote(os.path.basename(e["Path"]))): e["Size"]
       for e in entries
@@ -59,15 +54,14 @@ def list_user_files(user_uuid: str) -> dict[str, int]:
 
 def write_user_meta(user_uuid: str, email: str):
   meta_name = "." + email.split("@")[0]
-  meta_path = os.path.join(tempfile.mkdtemp(), meta_name)
-  with open(meta_path, "w") as f:
-    f.write(email)
-  try:
-    rclone.copy(meta_path, f"{BUCKET}/{user_uuid}", args=["--verbose"])
-  except Exception as e:
-    print(f"Failed to write .{meta_name}: {e}")
-  finally:
-    os.remove(meta_path)
+  with tempfile.TemporaryDirectory() as tmp_dir:
+    meta_path = os.path.join(tmp_dir, meta_name)
+    with open(meta_path, "w") as f:
+      f.write(email)
+    try:
+      rclone.copy(meta_path, f"{BUCKET}/{user_uuid}", args=["--verbose"])
+    except Exception as e:
+      print(f"Failed to write .{meta_name}: {e}")
 
 def send_upload_email(email: str, links: list):
   links_html = "".join(
@@ -77,9 +71,9 @@ def send_upload_email(email: str, links: list):
   email_html = f"""
   <table style="border-collapse:collapse;width:100%;background:#ffffff;color:#000000;border:2px solid #000000;font-family:sans-serif">
     <tr style="background:#ffffff">
-      <th style="border:1px solid #000000;padding:8px;text-align:left;width=20%">Filename</th>
-      <th style="border:1px solid #000000;padding:8px;text-align:left;width=60%">URL</th>
-      <th style="border:1px solid #000000;padding:8px;text-align:left;width=20%">Date Modified</th>
+      <th style="border:1px solid #000000;padding:8px;text-align:left;width:20%">Filename</th>
+      <th style="border:1px solid #000000;padding:8px;text-align:left;width:60%">URL</th>
+      <th style="border:1px solid #000000;padding:8px;text-align:left;width:20%">Date Modified</th>
     </tr>
     {links_html}
   </table>
@@ -152,7 +146,6 @@ def upload(files, stored_state) -> tuple[str, list]:
     srcs = [(s, os.path.basename(s))]
   elif isinstance(files, list):
     for f in files:
-      print(f"DEBUG file object: type={type(f)}, value={f}")
       if isinstance(f, str):
         srcs.append((f, os.path.basename(f)))
       elif isinstance(f, dict):
@@ -183,7 +176,7 @@ def upload(files, stored_state) -> tuple[str, list]:
 
   if not to_upload:
     dup_list = "\n".join(duplicates)
-    return f"All files have already been uploaded:\n{dup_list}\n\nPlease check your email inbox for previous upload results.", []
+    return f"All files have already been uploaded:\n{dup_list}\n\nPlease check your previous uploaded files for duplicate entries.", []
 
   is_new_user = not existing
 
@@ -251,20 +244,18 @@ def upload(files, stored_state) -> tuple[str, list]:
 
   return status, rows
 
-def unupload(link: str, stored_state) -> tuple[str, list]:
+def unupload(link: str, stored_state) -> str:
   state_value = stored_state.value if hasattr(stored_state, 'value') else stored_state
   user_email = state_value[2] if len(state_value) > 2 else None
   if not user_email:
     return "Could not determine user identity, please log in again."
-  
-  # check user_uuid
+
   user_uuid = get_user_uuid(user_email)
   if user_uuid not in link:
     return "Delete failed: you do not have permission to delete this file."
 
-  link_path = unquote(link).replace("https://cdn.rundle.ab.ca/", "r2:canvas-storage/")
+  link_path = unquote(link).replace("https://cdn.rundle.ab.ca/", f"{BUCKET}/")
 
-  # check file exists
   check = subprocess.run(
     ["rclone", "--config", RCLONE_CONFIG, "lsjson", link_path],
     capture_output=True, text=True, timeout=30
@@ -273,7 +264,6 @@ def unupload(link: str, stored_state) -> tuple[str, list]:
   if not entries:
     return "Delete failed: file not found."
 
-  # delete file
   result = subprocess.run(
     ["rclone", "--config", RCLONE_CONFIG, "deletefile", link_path, "--verbose"],
     capture_output=True, text=True, timeout=30
