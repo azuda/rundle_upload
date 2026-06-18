@@ -160,8 +160,7 @@ def create_login_page():
   with gr.Row(visible=True) as login_page:
     with gr.Column(scale=3):
       email = gr.Textbox(label="Enter your email to log in:")
-      # send_button = gr.Button("Send One-Time Verification Link", elem_id="button_colour")
-      send_button = gr.Button("Send One-Time Verification Link")
+      send_button = gr.Button("Send One-Time Verification Link", elem_id="button_colour")
     with gr.Column(scale=2):
       login_message = gr.Textbox(label="Status", interactive=False, lines=2, max_lines=16)
     email.submit(fn=send_magic_link, inputs=[email], outputs=[login_message])
@@ -175,8 +174,7 @@ def create_main_page(stored_state):
     with gr.Row():
       with gr.Column(scale=3):
         files_input = gr.Files(label="Select file(s) to upload...", file_types=FILE_TYPES)
-        # upload_button = gr.Button("Upload File(s)", elem_id="button_colour")
-        upload_button = gr.Button("Upload File(s)")
+        upload_button = gr.Button("Upload File(s)", elem_id="button_colour")
       with gr.Column(scale=2):
         link_to_delete = gr.Textbox(label="Enter URL of a file to delete from cloud storage (exact match required):", lines=1, max_lines=2)
         delete_button = gr.Button("Delete File", variant="huggingface")
