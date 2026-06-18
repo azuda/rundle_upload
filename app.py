@@ -11,11 +11,22 @@ import gradio as gr
 import os
 from starlette.requests import Request
 
-from frontend import create_gradio_ui, STYLE
+from frontend import create_gradio_ui
 
 load_dotenv()
 PROJECT_ID = os.getenv("DESCOPE_ID")
 descope_client = DescopeClient(project_id=PROJECT_ID)
+
+STYLE = """
+#button_colour {
+  background-color: #58212E;
+  color: white;
+  border-color: #58212E;
+}
+#button_colour:hover {
+  background-color: #7A2E42;
+}
+"""
 
 # ============================================================================================================================================================================
 

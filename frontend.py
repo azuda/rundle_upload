@@ -1,6 +1,5 @@
 # frontend.py
 
-
 from descope import DescopeClient, DeliveryMethod, AuthException
 from dotenv import load_dotenv
 import gradio as gr
@@ -10,6 +9,7 @@ import traceback
 import truststore
 
 truststore.inject_into_ssl()
+
 from backend import extract_email_from_jwt, get_user_uuid, list_user_uploads, upload, unupload
 
 load_dotenv()
@@ -19,15 +19,10 @@ descope_client = DescopeClient(project_id=PROJECT_ID)
 # change acceptable file formats here
 FILE_TYPES = ["audio", ".pdf", ".html"]
 
-# css
-STYLE = """
-#button_colour {
-  background-color: #58212E;
-  color: white;
-  border-color: #58212E;
-}
-#button_colour:hover {
-  background-color: #7A2E42;
+LOGOUT_JS = """
+() => {
+  window.history.replaceState({}, document.title, "/");
+  setTimeout(() => { window.location.replace("/") }, 300);
 }
 """
 
@@ -45,6 +40,7 @@ def send_magic_link(email: str) -> str:
     return f"Magic link sent to {email}! Please check your inbox."
   except Exception as e:
     return f"Error sending magic link: {str(e)}"
+
 
 def get_token_and_update_state(stored_state, request: gr.Request):
   try:
@@ -72,6 +68,7 @@ def get_token_and_update_state(stored_state, request: gr.Request):
 
   print("No token in URL, checking stored state...")
   return load_stored_session(stored_state)
+
 
 def load_stored_session(stored_state):
   state_value = stored_state.value if hasattr(stored_state, 'value') else stored_state
@@ -136,6 +133,7 @@ def load_stored_session(stored_state):
     ["", ""]
   )
 
+
 def logout_user(stored_state):
   state_value = stored_state.value if hasattr(stored_state, 'value') else stored_state
   try:
@@ -156,25 +154,19 @@ def logout_user(stored_state):
     ["", ""]
   )
 
-def logout_js():
-  return """
-  () => {
-    window.history.replaceState({}, document.title, "/");
-    setTimeout(() => { window.location.replace("/") }, 300);
-  }
-  """
-
 # ============================================================================================================================================================================
 
 def create_login_page():
   with gr.Row(visible=True) as login_page:
     with gr.Column(scale=3):
       email = gr.Textbox(label="Enter your email to log in:")
-      send_button = gr.Button("Send One-Time Verification Link", elem_id="button_colour")
+      # send_button = gr.Button("Send One-Time Verification Link", elem_id="button_colour")
+      send_button = gr.Button("Send One-Time Verification Link")
     with gr.Column(scale=2):
       login_message = gr.Textbox(label="Status", interactive=False, lines=2, max_lines=16)
     email.submit(fn=send_magic_link, inputs=[email], outputs=[login_message])
   return login_page, email, send_button, login_message
+
 
 def create_main_page(stored_state):
   with gr.Column(visible=False) as main_page:
@@ -183,7 +175,8 @@ def create_main_page(stored_state):
     with gr.Row():
       with gr.Column(scale=3):
         files_input = gr.Files(label="Select file(s) to upload...", file_types=FILE_TYPES)
-        upload_button = gr.Button("Upload File(s)", elem_id="button_colour")
+        # upload_button = gr.Button("Upload File(s)", elem_id="button_colour")
+        upload_button = gr.Button("Upload File(s)")
       with gr.Column(scale=2):
         link_to_delete = gr.Textbox(label="Enter URL of a file to delete from cloud storage (exact match required):", lines=1, max_lines=2)
         delete_button = gr.Button("Delete File", variant="huggingface")
@@ -231,12 +224,13 @@ def create_main_page(stored_state):
     )
   return main_page, output_table, logout_button
 
+
 def create_gradio_ui() -> gr.Blocks:
   with gr.Blocks(title="Uploader") as gradio_ui:
     stored_state = gr.BrowserState(["", "", ""])
 
     login_page, email, send_button, login_message = create_login_page()
-    main_page, output_table, logout_button = create_main_page(stored_state)  # <-- unpack output_table
+    main_page, output_table, logout_button = create_main_page(stored_state)
 
     send_button.click(fn=send_magic_link, inputs=[email], outputs=[login_message])
 
@@ -254,15 +248,16 @@ def create_gradio_ui() -> gr.Blocks:
       fn=logout_user,
       inputs=[stored_state],
       outputs=[login_page, main_page, login_message, stored_state],
-      js=logout_js()
+      js=LOGOUT_JS
     )
 
   return gradio_ui
 
+
 def build_table(stored_state, highlight_urls: set = None):
   state_value = stored_state.value if hasattr(stored_state, 'value') else stored_state
   user_email = state_value[2] if isinstance(state_value, list) and len(state_value) > 2 else ""
-  
+
   all_rows = []
   if user_email:
     user_uuid = get_user_uuid(user_email)
@@ -285,7 +280,6 @@ def build_table(stored_state, highlight_urls: set = None):
       return ["color-scheme: light dark; background-color: light-dark(#ffff54, #515115);"] * len(row) if row.name in highlight_indices else [""] * len(row)
     return df.style.apply(_style_rows, axis=1)
   return df.style
-
 
 
 def do_upload(files, stored_state):
