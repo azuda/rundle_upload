@@ -224,7 +224,7 @@ def create_main_page(stored_state):
 
 
 def create_gradio_ui() -> gr.Blocks:
-  with gr.Blocks(title="Uploader") as gradio_ui:
+  with gr.Blocks(title="Uploader", footer_links=[]) as gradio_ui:
     stored_state = gr.BrowserState(["", "", ""])
 
     login_page, email, send_button, login_message = create_login_page()
