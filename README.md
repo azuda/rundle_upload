@@ -59,6 +59,13 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+decrypt the environment file (`.env` is committed encrypted as `.env.age` using [age](https://github.com/FiloSottile/age); decrypt with the private key at `~/.age/upload.txt`):
+
+```bash
+brew install age
+age -d -i ~/.age/upload.txt -o .env .env.age
+```
+
 run script:
 
 ```bash
@@ -92,6 +99,12 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install --upgrade pip
 pip install -r requirements.txt
+```
+
+Decrypt the environment file (same `.env.age` as macOS, using [age](https://github.com/FiloSottile/age/releases) — install it and place the private key at `%USERPROFILE%\.age\upload.txt`):
+
+```powershell
+age -d -i $env:USERPROFILE\.age\upload.txt -o .env .env.age
 ```
 
 Run script:
