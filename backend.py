@@ -7,6 +7,7 @@ import os
 from rclone_python import rclone
 import re
 import resend
+import shutil
 import subprocess
 import tempfile
 from urllib.parse import quote, unquote
@@ -195,7 +196,7 @@ def upload(files, stored_state) -> tuple[str, list]:
       # copy to a temp dir with the correct original name so rclone uploads it with the right name
       with tempfile.TemporaryDirectory() as tmp_dir:
         dest_path = os.path.join(tmp_dir, orig_name)
-        os.link(temp_path, dest_path)
+        shutil.copy(temp_path, dest_path)
         rclone.copy(dest_path, upload_dir, ignore_existing=True, args=["--create-empty-src-dirs"])
       uploaded.append((temp_path, orig_name))
     except Exception as e:
