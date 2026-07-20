@@ -65,3 +65,37 @@ run script:
 chmod +x run.sh
 ./run.sh
 ```
+
+## Windows Server Setup
+
+Equivalent setup for running on Windows Server (PowerShell).
+
+### Cloudflare Tunnel
+
+1. Download `cloudflared` for Windows from the [Cloudflare releases page](https://github.com/cloudflare/cloudflared/releases) and ensure `cloudflared.exe` is on `PATH`.
+2. Export the same Cloudflare gateway root CA used on macOS to the project directory as `cert.pem` (see the Cloudflare Tunnel section above for how to obtain it).
+3. Copy `cert.pem` to `%USERPROFILE%\.cloudflared\`
+
+### rclone
+
+1. Download `rclone` for Windows from [rclone.org/downloads](https://rclone.org/downloads/) and ensure `rclone.exe` is on `PATH`.
+2. Run `rclone config` and follow the same steps as the macOS setup above to create the `r2` remote.
+
+### Gradio / FastAPI Web App
+
+Set up and install dependencies:
+
+```powershell
+git clone https://github.com/auda/rundle_upload.git
+cd rundle_upload
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+Run script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File run.ps1
+```
