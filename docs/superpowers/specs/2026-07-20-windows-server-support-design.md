@@ -4,7 +4,7 @@
 
 Allow this project (Gradio + FastAPI SSO uploader, currently launched via `run.sh` on macOS)
 to run on Windows Server: add a `run.ps1` wrapper equivalent to `run.sh`, and fix any
-Windows-incompatible code paths.
+Windows-incompatible code paths. Ensure the project can still be run on both platforms to support dev and testing.
 
 ## Context
 
