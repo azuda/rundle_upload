@@ -44,12 +44,12 @@ if (-not (Test-Path $pythonExe)) {
     throw "Python venv not found at $pythonExe. Create it first with: python -m venv .venv"
 }
 
-$appProcess = Start-Process -FilePath $pythonExe -ArgumentList "app.py" -WorkingDirectory $ScriptDir -PassThru -NoNewWindow
-Write-Host "App started w PID: $($appProcess.Id)"
-
-Start-Sleep -Seconds 5
-
 try {
+    $appProcess = Start-Process -FilePath $pythonExe -ArgumentList "app.py" -WorkingDirectory $ScriptDir -PassThru -NoNewWindow
+    Write-Host "App started w PID: $($appProcess.Id)"
+
+    Start-Sleep -Seconds 5
+
     if (-not $env:CF_TUNNEL_TOKEN) {
         throw "CF_TUNNEL_TOKEN is not set (check .env)"
     }
