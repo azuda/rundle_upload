@@ -53,7 +53,7 @@ try {
     if (-not $env:CF_TUNNEL_TOKEN) {
         throw "CF_TUNNEL_TOKEN is not set (check .env)"
     }
-    cloudflared tunnel run --protocol http2 --token $env:CF_TUNNEL_TOKEN
+    cloudflared tunnel run --protocol http2 --token "$env:CF_TUNNEL_TOKEN"
 }
 finally {
     Write-Host "Caught exit. Stopping Python app (PID $($appProcess.Id))..."

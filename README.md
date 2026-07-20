@@ -74,6 +74,7 @@ Equivalent setup for running on Windows Server (PowerShell).
 
 1. Download `cloudflared` for Windows from the [Cloudflare releases page](https://github.com/cloudflare/cloudflared/releases) and ensure `cloudflared.exe` is on `PATH`.
 2. Export the same Cloudflare gateway root CA used on macOS to the project directory as `cert.pem` (see the Cloudflare Tunnel section above for how to obtain it).
+3. Copy `cert.pem` to `%USERPROFILE%\.cloudflared\`
 
 ### rclone
 
