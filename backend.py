@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import json
 import os
-from rclone_python import rclone
 import re
 import resend
 import shutil
@@ -17,6 +16,7 @@ load_dotenv()
 RCLONE_CONFIG = os.getenv("RCLONE_CONFIG")
 BUCKET = os.getenv("BUCKET")
 RESEND_KEY = os.getenv("RESEND_KEY")
+RCLONE_COPY_TIMEOUT = 300  # bound worst-case network stalls so a hung transfer can't pin a worker thread forever
 
 # ============================================================================================================================================================================
 
@@ -60,7 +60,10 @@ def write_user_meta(user_uuid: str, email: str):
     with open(meta_path, "w") as f:
       f.write(email)
     try:
-      rclone.copy(meta_path, f"{BUCKET}/{user_uuid}", args=["--verbose"])
+      subprocess.run(
+        ["rclone", "--config", RCLONE_CONFIG, "copy", meta_path, f"{BUCKET}/{user_uuid}", "--verbose"],
+        capture_output=True, text=True, timeout=30, check=True
+      )
     except Exception as e:
       print(f"Failed to write .{meta_name}: {e}")
 
@@ -161,9 +164,6 @@ def upload(files, stored_state) -> tuple[str, list]:
   if not srcs:
     return "No valid local file paths found for upload.", []
 
-  if RCLONE_CONFIG:
-    rclone.set_config_file(RCLONE_CONFIG)
-
   existing = list_user_files(user_uuid)
 
   duplicates = []
@@ -182,7 +182,10 @@ def upload(files, stored_state) -> tuple[str, list]:
   is_new_user = not existing
 
   try:
-    rclone.mkdir(upload_dir, args=["--verbose"])
+    subprocess.run(
+      ["rclone", "--config", RCLONE_CONFIG, "mkdir", upload_dir, "--verbose"],
+      capture_output=True, text=True, timeout=30, check=True
+    )
   except Exception as e:
     print(f"mkdir warning: {e}")
 
@@ -197,7 +200,10 @@ def upload(files, stored_state) -> tuple[str, list]:
       with tempfile.TemporaryDirectory() as tmp_dir:
         dest_path = os.path.join(tmp_dir, orig_name)
         shutil.copy(temp_path, dest_path)
-        rclone.copy(dest_path, upload_dir, ignore_existing=True, args=["--create-empty-src-dirs"])
+        subprocess.run(
+          ["rclone", "--config", RCLONE_CONFIG, "copy", dest_path, upload_dir, "--ignore-existing", "--create-empty-src-dirs"],
+          capture_output=True, text=True, timeout=RCLONE_COPY_TIMEOUT, check=True
+        )
       uploaded.append((temp_path, orig_name))
     except Exception as e:
       failures.append((orig_name, str(e)))
